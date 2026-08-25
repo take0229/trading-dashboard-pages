@@ -71,45 +71,57 @@
         <div id="connection-state" class="connection-state"><span></span>接続済み</div>
       </section>
 
-      <section class="filter-bar" aria-label="結果フィルター">
+      <section class="filter-bar" aria-label="分析結果を選択">
+        <div class="filter-title"><p class="eyebrow">RESULT EXPLORER</p><h2>分析結果を選択</h2></div>
         <label>対象日<select id="target-date"></select></label>
         <label>市場<select id="market"><option value="TSE">東京証券取引所</option></select></label>
-        <button id="apply-filter" class="primary-button compact" type="button">表示する</button>
+        <button id="apply-filter" class="primary-button compact" type="button">結果を表示</button>
+        <aside class="latest-batch" aria-label="最終バッチ実行">
+          <span>最終バッチ実行</span><strong id="latest-batch-time">確認中…</strong>
+          <small id="latest-batch-target"></small><small id="auto-refresh-status">30秒ごとに自動更新</small>
+        </aside>
+        <div class="manual-batch-note"><strong>手動バッチ実行</strong><span>GitHub Actionsの「Daily screening」から実行できます。</span><a href="https://github.com/take0229/semi-automatic-trading/actions/workflows/daily-screening.yml" target="_blank" rel="noopener noreferrer">GitHub Actionsを開く ↗</a></div>
         <p id="last-updated" class="last-updated"></p>
       </section>
 
       <div id="app-message" class="app-message" role="status" aria-live="polite"></div>
 
-      <section class="kpi-grid" aria-label="実行概要">
-        <article class="kpi-card accent"><span>実行状態</span><strong id="run-status">—</strong><small id="run-finished">—</small></article>
-        <article class="kpi-card"><span>候補数</span><strong id="candidate-count">—</strong><small>今回の分析結果</small></article>
-        <article class="kpi-card"><span>読込レコード</span><strong id="loaded-count">—</strong><small>品質検査対象</small></article>
-        <article class="kpi-card"><span>品質状態</span><strong id="quality-status">—</strong><small id="run-version">—</small></article>
+      <section class="run-panel">
+        <div class="run-line"><span id="run-status" class="candidate-state">—</span><span id="run-date">—</span></div>
+        <h2>今日の判断材料</h2><p id="run-description" class="muted"></p>
+      </section>
+
+      <section id="batch-alerts" class="batch-alerts" hidden>
+        <div class="section-heading"><h2 id="batch-alerts-title">バッチ処理の警告</h2><span id="batch-alerts-count" class="score-badge"></span></div>
+        <ul id="batch-alerts-list"></ul>
+      </section>
+
+      <section class="kpi-grid" aria-label="シミュレーション概要">
+        <article class="kpi-card accent"><span>ペーパー総資産</span><strong id="paper-total-assets">—</strong><small id="paper-initial-cash">—</small></article>
+        <article class="kpi-card"><span>利用可能現金</span><strong id="paper-cash">—</strong><small>追加選択に利用可能</small></article>
+        <article class="kpi-card"><span>保有時価</span><strong id="paper-market-value">—</strong><small id="paper-invested">—</small></article>
+        <article class="kpi-card"><span>評価損益</span><strong id="paper-profit">—</strong><small id="paper-return-rate">—</small></article>
       </section>
 
       <section class="section-block">
         <div class="section-heading">
-          <div><p class="eyebrow">SCREENING</p><h2>取引候補</h2></div>
-          <p id="decision-safety" class="safety-pill">実注文は送信されません</p>
+          <div><p class="eyebrow">SIGNALS</p><h2>売買候補</h2></div>
+          <div class="heading-actions"><span id="candidate-count" class="score-badge">—</span><p id="decision-safety" class="safety-pill">実注文は送信されません</p></div>
         </div>
         <div id="candidate-list" class="candidate-grid"></div>
       </section>
 
-      <section class="split-grid">
-        <article class="panel">
-          <div class="section-heading"><div><p class="eyebrow">DECISIONS</p><h2>判断履歴</h2></div></div>
-          <div class="table-wrap"><table><thead><tr><th>日時</th><th>候補</th><th>判断</th><th>理由</th></tr></thead><tbody id="decision-history"></tbody></table></div>
-        </article>
-        <article class="panel">
-          <div class="section-heading"><div><p class="eyebrow">PAPER ORDERS</p><h2>ペーパー注文</h2></div></div>
-          <div id="paper-orders" class="order-list"></div>
-        </article>
+      <section class="section-block">
+        <div class="section-heading"><div><p class="eyebrow">PAPER POSITIONS</p><h2>ペーパートレード保有状況</h2></div></div>
+        <div id="positions" class="position-list"></div>
       </section>
 
-      <section class="panel audit-panel">
-        <div class="section-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h2>監査履歴</h2></div></div>
-        <div id="audit-events" class="audit-list"></div>
+      <section class="section-block">
+        <div class="section-heading"><div><p class="eyebrow">PAPER SELECTION LOG</p><h2>選択履歴</h2></div></div>
+        <div class="table-wrap"><table><thead><tr><th>選択日時</th><th>銘柄</th><th>区分</th><th>数量</th><th>選択株価</th><th>状態</th></tr></thead><tbody id="trade-history"></tbody></table></div>
       </section>
+
+      <footer class="page-footer"><p id="data-source-note">データ取得元を確認しています。投資助言ではなく、実注文は送信されません。</p><p id="run-id"></p></footer>
     </main>
   </div>
 

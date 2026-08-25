@@ -99,7 +99,9 @@ export function safeInstrumentCode(value) {
 
 export function quoteUrl(value) {
   const code = safeInstrumentCode(value);
-  return code ? `https://finance.yahoo.co.jp/quote/${encodeURIComponent(code)}` : "";
+  if (!code) return "";
+  const symbol = code.replace(/\.T$/i, "");
+  return `https://finance.yahoo.co.jp/quote/${encodeURIComponent(symbol)}.T`;
 }
 
 export function newRequestId() {
