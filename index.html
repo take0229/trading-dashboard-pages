@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src https://hovdyyflzbghjtwdlqzb.supabase.co; upgrade-insecure-requests">
+  <title>取引候補ダッシュボード</title>
+  <link rel="stylesheet" href="assets/app.css">
+  <script src="config.js" defer></script>
+  <script type="module" src="assets/app.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">本文へ移動</a>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
+  <section id="boot-screen" class="center-screen" aria-live="polite">
+    <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+    <p>安全なセッションを確認しています</p>
+  </section>
+
+  <main id="login-screen" class="login-shell" hidden>
+    <section class="login-story" aria-labelledby="login-title">
+      <p class="eyebrow">PRIVATE MARKET WORKSPACE</p>
+      <h1 id="login-title">判断に必要な情報を、<br>静かに一か所へ。</h1>
+      <p>分析結果の確認とペーパートレード判断を行う、本人専用ダッシュボードです。</p>
+      <div class="security-note">
+        <span class="security-icon" aria-hidden="true">✓</span>
+        <div><strong>保護されたデータ</strong><small>ログイン前に取引候補データを取得することはありません。</small></div>
+      </div>
+    </section>
+    <section class="login-card" aria-label="ログイン">
+      <div>
+        <p class="eyebrow">WELCOME BACK</p>
+        <h2>ログイン</h2>
+        <p class="muted">登録済みのメールアドレスを使用してください。</p>
+      </div>
+      <form id="login-form" novalidate>
+        <label for="email">メールアドレス</label>
+        <input id="email" name="email" type="email" autocomplete="username" inputmode="email" required>
+        <label for="password">パスワード</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8">
+        <button id="login-button" class="primary-button" type="submit">ログイン</button>
+      </form>
+      <p id="login-message" class="form-message" role="alert" aria-live="assertive"></p>
+      <p class="login-footnote">新規登録はできません。利用できない場合はSupabase管理設定を確認してください。</p>
+    </section>
+  </main>
+
+  <div id="app-screen" hidden>
+    <header class="app-header">
+      <a class="brand" href="./" aria-label="取引候補ダッシュボード ホーム">
+        <span class="brand-symbol" aria-hidden="true">T</span>
+        <span><strong>Trading Desk</strong><small>Decision workspace</small></span>
+      </a>
+      <div class="header-actions">
+        <span id="session-user" class="session-user"></span>
+        <button id="refresh-button" class="ghost-button" type="button">更新</button>
+        <button id="logout-button" class="ghost-button danger" type="button">ログアウト</button>
+      </div>
+    </header>
+
+    <main id="main-content" class="dashboard-shell">
+      <section class="hero-row">
+        <div>
+          <p class="eyebrow">DAILY REVIEW</p>
+          <h1>取引候補ダッシュボード</h1>
+          <p class="muted">分析結果を確認し、人間の判断をペーパートレードとして記録します。</p>
+        </div>
+        <div id="connection-state" class="connection-state"><span></span>接続済み</div>
+      </section>
+
+      <section class="filter-bar" aria-label="結果フィルター">
+        <label>対象日<select id="target-date"></select></label>
+        <label>市場<select id="market"><option value="TSE">東京証券取引所</option></select></label>
+        <button id="apply-filter" class="primary-button compact" type="button">表示する</button>
+        <p id="last-updated" class="last-updated"></p>
+      </section>
+
+      <div id="app-message" class="app-message" role="status" aria-live="polite"></div>
+
+      <section class="kpi-grid" aria-label="実行概要">
+        <article class="kpi-card accent"><span>実行状態</span><strong id="run-status">—</strong><small id="run-finished">—</small></article>
+        <article class="kpi-card"><span>候補数</span><strong id="candidate-count">—</strong><small>今回の分析結果</small></article>
+        <article class="kpi-card"><span>読込レコード</span><strong id="loaded-count">—</strong><small>品質検査対象</small></article>
+        <article class="kpi-card"><span>品質状態</span><strong id="quality-status">—</strong><small id="run-version">—</small></article>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div><p class="eyebrow">SCREENING</p><h2>取引候補</h2></div>
+          <p id="decision-safety" class="safety-pill">実注文は送信されません</p>
+        </div>
+        <div id="candidate-list" class="candidate-grid"></div>
+      </section>
+
+      <section class="split-grid">
+        <article class="panel">
+          <div class="section-heading"><div><p class="eyebrow">DECISIONS</p><h2>判断履歴</h2></div></div>
+          <div class="table-wrap"><table><thead><tr><th>日時</th><th>候補</th><th>判断</th><th>理由</th></tr></thead><tbody id="decision-history"></tbody></table></div>
+        </article>
+        <article class="panel">
+          <div class="section-heading"><div><p class="eyebrow">PAPER ORDERS</p><h2>ペーパー注文</h2></div></div>
+          <div id="paper-orders" class="order-list"></div>
+        </article>
+      </section>
+
+      <section class="panel audit-panel">
+        <div class="section-heading"><div><p class="eyebrow">AUDIT TRAIL</p><h2>監査履歴</h2></div></div>
+        <div id="audit-events" class="audit-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="decision-dialog" class="decision-dialog">
+    <form id="decision-form" method="dialog">
+      <div class="dialog-heading"><p class="eyebrow">HUMAN DECISION</p><h2 id="decision-title">候補を判断</h2><p id="decision-description" class="muted"></p></div>
+      <input id="decision-candidate-id" type="hidden">
+      <input id="decision-value" type="hidden">
+      <label for="decision-reason">判断理由</label>
+      <textarea id="decision-reason" maxlength="1000" rows="4" required></textarea>
+      <p class="dialog-warning">この操作はペーパートレードの記録のみです。実際の注文は送信されません。</p>
+      <div class="dialog-actions"><button id="decision-cancel" class="ghost-button" type="button">キャンセル</button><button id="decision-submit" class="primary-button" type="submit">記録する</button></div>
+      <p id="decision-message" class="form-message" role="alert"></p>
+    </form>
+  </dialog>
+</body>
+</html>
