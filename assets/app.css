@@ -165,6 +165,14 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest); box-sha
 .position-item header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
 .position-value { font-family: Georgia, serif; font-size: 1.35rem; }
 .position-item > p { margin: 0; color: var(--muted); font-size: .78rem; line-height: 1.6; }
+.exit-signal { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-radius: 12px; background: #f3f5f0; }
+.exit-signal strong { margin-right: auto; }
+.exit-signal small { color: var(--muted); }
+.exit-signal.take_profit { color: var(--forest); background: #e2f2e8; }
+.exit-signal.stop_loss { color: var(--red); background: #fae9e5; }
+.exit-button { min-height: 38px; padding: 0 14px; border: 0; border-radius: 10px; color: white; font-weight: 800; white-space: nowrap; }
+.exit-button.take_profit { background: var(--forest); }
+.exit-button.stop_loss { background: var(--red); }
 .positive { color: var(--forest) !important; }
 .negative { color: var(--red) !important; }
 .acquisition-reasons article { display: grid; gap: 5px; margin-top: 10px; padding: 12px; border-radius: 11px; background: #f3f5f0; }
@@ -234,6 +242,8 @@ td:last-child { min-width: 180px; }
   .panel { padding: 18px; }
   .audit-list { grid-template-columns: 1fr; }
   .position-item header { grid-template-columns: 1fr; }
+  .exit-signal { align-items: flex-start; flex-direction: column; }
+  .exit-button { width: 100%; }
   .page-footer { flex-direction: column; gap: 4px; }
 }
 

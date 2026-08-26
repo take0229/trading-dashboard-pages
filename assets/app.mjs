@@ -25,6 +25,7 @@ const state = {
   allCandidates: [],
   decisions: [],
   orders: [],
+  exits: [],
   portfolioSettings: null,
   positionPrices: [],
   positionRefresh: null,
@@ -34,6 +35,7 @@ const state = {
   dashboardRefreshing: false,
   lockTimer: null,
   decisionPending: false,
+  exitPending: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -127,6 +129,7 @@ function clearSensitiveState() {
   state.allCandidates = [];
   state.decisions = [];
   state.orders = [];
+  state.exits = [];
   state.portfolioSettings = null;
   state.positionPrices = [];
   state.positionRefresh = null;
@@ -346,7 +349,12 @@ async function loadSelectedRun() {
       limit: "1000",
     }),
     query("paper_orders", {
-      select: "order_id,decision_id,candidate_id,environment,side,quantity,reference_price,status,created_at,cancelled_at",
+      select: "order_id,decision_id,candidate_id,environment,side,quantity,reference_price,status,created_at,cancelled_at,closed_at",
+      order: "created_at.desc",
+      limit: "1000",
+    }),
+    query("paper_exits", {
+      select: "exit_id,request_id,instrument_code,instrument_name,action,quantity,exit_price,valuation_date,cost_basis,proceeds,realized_profit_loss,reason,outcome,created_at",
       order: "created_at.desc",
       limit: "1000",
     }),
@@ -365,7 +373,7 @@ async function loadSelectedRun() {
     const detail = results[0].reason?.message || "再読み込みしてください。";
     throw new Error(`選択した対象日の候補データを取得できませんでした。${detail}`);
   }
-  const labels = ["候補", "全候補履歴", "判断履歴", "選択履歴", "初期資金", "保有価格履歴", "価格更新状態"];
+  const labels = ["候補", "全候補履歴", "判断履歴", "選択履歴", "決済履歴", "初期資金", "保有価格履歴", "価格更新状態"];
   state.dataWarnings = results.flatMap((result, index) => (
     result.status === "rejected" ? [`${labels[index]}を取得できませんでした`] : []
   ));
@@ -375,9 +383,10 @@ async function loadSelectedRun() {
   if (!state.allCandidates.length && state.candidates.length) state.allCandidates = [...state.candidates];
   state.decisions = asArray(value(2, []));
   state.orders = asArray(value(3, []));
-  state.portfolioSettings = asArray(value(4, []))[0] || null;
-  state.positionPrices = asArray(value(5, []));
-  state.positionRefresh = asArray(value(6, []))[0] || null;
+  state.exits = asArray(value(4, []));
+  state.portfolioSettings = asArray(value(5, []))[0] || null;
+  state.positionPrices = asArray(value(6, []));
+  state.positionRefresh = asArray(value(7, []))[0] || null;
   renderDashboard();
   setMessage(
     state.dataWarnings.length ? `候補を表示しました。一部の履歴は取得できませんでした：${state.dataWarnings.join("、")}` : "",
@@ -430,7 +439,7 @@ function renderRunSummary() {
 }
 
 function renderHistoryStatus() {
-  const summary = `Supabase履歴：分析実行 ${state.runs.length}件 / 候補 ${state.allCandidates.length}件 / 判断 ${state.decisions.length}件 / 選択 ${state.orders.length}件 / 保有価格 ${state.positionPrices.length}件`;
+  const summary = `Supabase履歴：分析実行 ${state.runs.length}件 / 候補 ${state.allCandidates.length}件 / 判断 ${state.decisions.length}件 / 選択 ${state.orders.length}件 / 決済 ${state.exits.length}件 / 保有価格 ${state.positionPrices.length}件`;
   $("history-status").textContent = state.dataWarnings.length
     ? `${summary}（一部取得エラーあり）`
     : `${summary}（移行済みデータを表示中）`;
@@ -529,27 +538,37 @@ function buildPaperPortfolio() {
     const averageCost = item.quantity ? item.invested_amount / item.quantity : 0;
     const marketValue = item.quantity * currentPrice;
     const profit = marketValue - item.invested_amount;
+    const returnRate = item.invested_amount ? profit / item.invested_amount : 0;
+    const signal = !price ? "unavailable" : returnRate >= 0.14 ? "take_profit" : returnRate <= -0.07 ? "stop_loss" : "hold";
     return {
       ...item,
       average_cost: averageCost,
       current_price: currentPrice,
       market_value: marketValue,
       unrealized_profit_loss: profit,
-      unrealized_return_rate: item.invested_amount ? profit / item.invested_amount : 0,
+      unrealized_return_rate: returnRate,
       valuation_date: price?.price_date || null,
+      take_profit_price: averageCost * 1.14,
+      stop_loss_price: averageCost * 0.93,
+      exit_signal: signal,
     };
   }).sort((left, right) => left.instrument_code.localeCompare(right.instrument_code));
   const investedAmount = positions.reduce((sum, item) => sum + item.invested_amount, 0);
   const marketValue = positions.reduce((sum, item) => sum + item.market_value, 0);
-  const profit = marketValue - investedAmount;
+  const unrealizedProfit = marketValue - investedAmount;
+  const realizedProfit = state.exits.reduce((sum, item) => sum + Number(item.realized_profit_loss || 0), 0);
+  const cashBalance = initialCash - investedAmount + realizedProfit;
+  const totalProfit = realizedProfit + unrealizedProfit;
   return {
     initial_cash: initialCash,
-    cash_balance: initialCash - investedAmount,
+    cash_balance: cashBalance,
     invested_amount: investedAmount,
     market_value: marketValue,
-    total_assets: initialCash - investedAmount + marketValue,
-    unrealized_profit_loss: profit,
-    unrealized_return_rate: investedAmount ? profit / investedAmount : 0,
+    total_assets: cashBalance + marketValue,
+    unrealized_profit_loss: unrealizedProfit,
+    realized_profit_loss: realizedProfit,
+    total_profit_loss: totalProfit,
+    total_return_rate: initialCash ? totalProfit / initialCash : 0,
     positions,
   };
 }
@@ -562,13 +581,13 @@ function renderPortfolio() {
   $("paper-market-value").textContent = formatYen(portfolio.market_value);
   const valuationDate = state.positionRefresh?.target_date || portfolio.positions[0]?.valuation_date || "未取得";
   $("paper-invested").textContent = `取得原価 ${formatYen(portfolio.invested_amount)} · 評価日 ${valuationDate}`;
-  const profit = portfolio.unrealized_profit_loss;
+  const profit = portfolio.total_profit_loss;
   $("paper-profit").textContent = `${profit > 0 ? "+" : ""}${formatYen(profit)}`;
   $("paper-profit").className = profit > 0 ? "positive" : profit < 0 ? "negative" : "";
-  const rate = portfolio.unrealized_return_rate * 100;
-  $("paper-return-rate").textContent = `取得原価比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`;
+  const rate = portfolio.total_return_rate * 100;
+  $("paper-return-rate").textContent = `実現 ${formatYen(portfolio.realized_profit_loss)} / 評価 ${formatYen(portfolio.unrealized_profit_loss)} / 総資産比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`;
   renderPositions(portfolio.positions);
-  renderTrades(state.orders, new Map(state.allCandidates.map((item) => [item.candidate_id, item])));
+  renderTrades(state.orders, state.exits, new Map(state.allCandidates.map((item) => [item.candidate_id, item])));
 }
 
 function renderCandidates() {
@@ -580,9 +599,14 @@ function renderCandidates() {
   }
   const decisions = latestDecisionByCandidate(state.decisions);
   const orders = activeOrderByCandidate(state.orders);
+  const latestOrders = new Map();
+  for (const order of state.orders) {
+    if (!latestOrders.has(order.candidate_id)) latestOrders.set(order.candidate_id, order);
+  }
   for (const item of state.candidates) {
     const latest = decisions.get(item.candidate_id);
     const activeOrder = orders.get(item.candidate_id);
+    const latestOrder = latestOrders.get(item.candidate_id);
     const card = document.createElement("article");
     card.className = "candidate-card";
     const top = document.createElement("div");
@@ -621,10 +645,11 @@ function renderCandidates() {
     card.append(meta);
     if (latest) card.append(textNode("small", `最新判断: ${latest.reason}（${formatDate(latest.decided_at)}）`, "muted"));
     if (activeOrder) card.append(textNode("small", `ペーパー注文: ${formatNumber(activeOrder.quantity, 0)}株 / ${formatYen(activeOrder.reference_price)}`, "muted"));
+    if (!activeOrder && latestOrder?.status === "closed") card.append(textNode("small", "ペーパー決済済み", "muted"));
     if (activeOrder) card.append(renderYahooPaperGuide(item, activeOrder));
 
     const eligible = Boolean(state.selectedRun?.decision_eligible && item.decision_eligible)
-      && item.status !== "expired" && Date.parse(item.expires_at) > Date.now();
+      && item.status !== "expired" && latestOrder?.status !== "closed" && Date.parse(item.expires_at) > Date.now();
     const actions = document.createElement("div");
     actions.className = "candidate-actions";
     for (const [decision, label] of [["approved", "採用する"], ["rejected", "見送る"]]) {
@@ -768,7 +793,28 @@ function renderPositions(positions) {
     const profit = item.unrealized_profit_loss;
     const summary = textNode("p", `平均 ${formatYen(item.average_cost)} / 現在 ${formatYen(item.current_price)} / 評価損益 ${profit > 0 ? "+" : ""}${formatYen(profit)}（取得額比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%） / 評価日 ${item.valuation_date || "未取得"}`);
     summary.className = profit > 0 ? "positive" : profit < 0 ? "negative" : "";
-    row.append(header, summary, renderStockLinks(item.instrument_code), renderAcquisitionReasons(item.acquisition_records));
+    const signalLabels = {
+      take_profit: "利確シグナル（+14%以上）",
+      stop_loss: "損切りシグナル（-7%以下）",
+      hold: "保有継続",
+      unavailable: "判定不可（保存済み株価なし）",
+    };
+    const signal = document.createElement("div");
+    signal.className = `exit-signal ${item.exit_signal}`;
+    signal.append(
+      textNode("strong", signalLabels[item.exit_signal]),
+      textNode("small", `利確目安 ${formatYen(item.take_profit_price)} / 損切り目安 ${formatYen(item.stop_loss_price)}`),
+    );
+    if (["take_profit", "stop_loss"].includes(item.exit_signal)) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `exit-button ${item.exit_signal}`;
+      button.textContent = item.exit_signal === "take_profit" ? "手動で利確する" : "手動で損切りする";
+      button.disabled = state.exitPending;
+      button.addEventListener("click", () => submitPaperExit(item));
+      signal.append(button);
+    }
+    row.append(header, summary, signal, renderStockLinks(item.instrument_code), renderAcquisitionReasons(item.acquisition_records));
     container.append(row);
   }
 }
@@ -799,11 +845,32 @@ function renderAcquisitionReasons(records) {
   return details;
 }
 
-function renderTrades(orders, candidates) {
+function renderTrades(orders, exits, candidates) {
   orders = asArray(orders);
+  exits = asArray(exits);
   const body = $("trade-history");
   body.replaceChildren();
-  for (const item of orders) {
+  const rows = [
+    ...orders.map((item) => ({ kind: "order", created_at: item.created_at, item })),
+    ...exits.map((item) => ({ kind: "exit", created_at: item.created_at, item })),
+  ].sort((left, right) => Date.parse(right.created_at || 0) - Date.parse(left.created_at || 0));
+  for (const entry of rows) {
+    const item = entry.item;
+    if (entry.kind === "exit") {
+      const profit = Number(item.realized_profit_loss || 0);
+      const values = [
+        formatDate(item.created_at),
+        `${item.instrument_code} ${item.instrument_name}`,
+        item.action === "take_profit" ? "利確" : "損切り",
+        `${formatNumber(item.quantity, 0)}株`,
+        formatYen(item.exit_price),
+        `実現 ${profit > 0 ? "+" : ""}${formatYen(profit)}`,
+      ];
+      const row = document.createElement("tr");
+      for (const value of values) row.append(textNode("td", value));
+      body.append(row);
+      continue;
+    }
     const candidate = candidates.get(item.candidate_id) || {};
     const values = [
       formatDate(item.created_at),
@@ -811,18 +878,46 @@ function renderTrades(orders, candidates) {
       item.side === "buy" ? "選択" : "解除",
       `${formatNumber(item.quantity, 0)}株`,
       formatYen(item.reference_price),
-      item.status === "created" ? "保有中" : "取消済み",
+      item.status === "created" ? "保有中" : item.status === "closed" ? "決済済み" : "取消済み",
     ];
     const row = document.createElement("tr");
     for (const value of values) row.append(textNode("td", value));
     body.append(row);
   }
-  if (!orders.length) {
+  if (!rows.length) {
     const row = document.createElement("tr");
-    const cell = textNode("td", "ペーパートレードの選択履歴はありません。", "muted");
+    const cell = textNode("td", "ペーパートレードの売買履歴はありません。", "muted");
     cell.colSpan = 6;
     row.append(cell);
     body.append(row);
+  }
+}
+
+async function submitPaperExit(item) {
+  if (state.exitPending || !["take_profit", "stop_loss"].includes(item.exit_signal)) return;
+  const label = item.exit_signal === "take_profit" ? "利確" : "損切り";
+  const reason = window.prompt(`${item.instrument_code} ${item.instrument_name}を${label}する理由を入力してください。`, `${label}ルールに到達したため手動決済`);
+  if (!reason?.trim()) return;
+  if (!window.confirm(`${formatNumber(item.quantity, 0)}株を${formatYen(item.current_price)}でペーパー${label}します。実際の注文は送信されません。よろしいですか？`)) return;
+  state.exitPending = true;
+  renderPortfolio();
+  try {
+    await businessRequest("/rpc/record_paper_position_exit", {
+      method: "POST",
+      body: {
+        p_request_id: newRequestId(),
+        p_instrument_code: item.instrument_code,
+        p_action: item.exit_signal,
+        p_reason: reason.trim(),
+      },
+    });
+    await loadSelectedRun();
+    setMessage(`${item.instrument_code}をペーパー${label}し、実現損益を資産に反映しました。`, "success");
+  } catch (error) {
+    setMessage(error.status ? businessErrorMessage(error.status) : error.message, "error");
+  } finally {
+    state.exitPending = false;
+    renderPortfolio();
   }
 }
 

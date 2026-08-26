@@ -6,9 +6,9 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src https://hovdyyflzbghjtwdlqzb.supabase.co; upgrade-insecure-requests">
   <title>取引候補ダッシュボード</title>
-  <link rel="stylesheet" href="assets/app.css?v=20260826-3">
+  <link rel="stylesheet" href="assets/app.css?v=20260827-1">
   <script src="config.js" defer></script>
-  <script type="module" src="assets/app.mjs?v=20260826-3"></script>
+  <script type="module" src="assets/app.mjs?v=20260827-1"></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">本文へ移動</a>
@@ -101,7 +101,7 @@
         <article class="kpi-card accent"><span>ペーパー総資産</span><strong id="paper-total-assets">—</strong><small id="paper-initial-cash">—</small></article>
         <article class="kpi-card"><span>利用可能現金</span><strong id="paper-cash">—</strong><small>追加選択に利用可能</small></article>
         <article class="kpi-card"><span>保有時価</span><strong id="paper-market-value">—</strong><small id="paper-invested">—</small></article>
-        <article class="kpi-card"><span>評価損益</span><strong id="paper-profit">—</strong><small id="paper-return-rate">—</small></article>
+        <article class="kpi-card"><span>損益合計</span><strong id="paper-profit">—</strong><small id="paper-return-rate">—</small></article>
       </section>
 
       <section class="section-block">
@@ -118,8 +118,8 @@
       </section>
 
       <section class="section-block">
-        <div class="section-heading"><div><p class="eyebrow">PAPER SELECTION LOG</p><h2>選択履歴</h2></div></div>
-        <div class="table-wrap"><table><thead><tr><th>選択日時</th><th>銘柄</th><th>区分</th><th>数量</th><th>選択株価</th><th>状態</th></tr></thead><tbody id="trade-history"></tbody></table></div>
+        <div class="section-heading"><div><p class="eyebrow">PAPER TRADE LOG</p><h2>売買履歴</h2></div></div>
+        <div class="table-wrap"><table><thead><tr><th>日時</th><th>銘柄</th><th>区分</th><th>数量</th><th>株価</th><th>状態・実現損益</th></tr></thead><tbody id="trade-history"></tbody></table></div>
       </section>
 
       <footer class="page-footer"><p id="data-source-note">データ取得元を確認しています。投資助言ではなく、実注文は送信されません。</p><p id="run-id"></p></footer>
