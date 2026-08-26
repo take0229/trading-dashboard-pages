@@ -6,9 +6,9 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src https://hovdyyflzbghjtwdlqzb.supabase.co; upgrade-insecure-requests">
   <title>取引候補ダッシュボード</title>
-  <link rel="stylesheet" href="assets/app.css">
+  <link rel="stylesheet" href="assets/app.css?v=20260826-2">
   <script src="config.js" defer></script>
-  <script type="module" src="assets/app.mjs"></script>
+  <script type="module" src="assets/app.mjs?v=20260826-2"></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">本文へ移動</a>
@@ -80,11 +80,12 @@
           <span>最終バッチ実行</span><strong id="latest-batch-time">確認中…</strong>
           <small id="latest-batch-target"></small><small id="auto-refresh-status">30秒ごとに自動更新</small>
         </aside>
-        <div class="manual-batch-note"><strong>手動バッチ実行</strong><span>GitHub Actionsの「Daily screening」から実行できます。</span><a href="https://github.com/take0229/semi-automatic-trading/actions/workflows/daily-screening.yml" target="_blank" rel="noopener noreferrer">GitHub Actionsを開く ↗</a></div>
+        <div class="manual-batch-note"><strong>手動バッチ実行</strong><span>GitHubへログイン後、「Daily screening」から実行できます。</span><a href="https://github.com/login?return_to=%2Ftake0229%2Fsemi-automatic-trading%2Factions%2Fworkflows%2Fdaily-screening.yml" target="_blank" rel="noopener noreferrer">GitHub Actionsを開く ↗</a></div>
         <p id="last-updated" class="last-updated"></p>
       </section>
 
       <div id="app-message" class="app-message" role="status" aria-live="polite"></div>
+      <p id="history-status" class="history-status">Supabaseの移行済み履歴を確認しています…</p>
 
       <section class="run-panel">
         <div class="run-line"><span id="run-status" class="candidate-state">—</span><span id="run-date">—</span></div>

@@ -28,6 +28,7 @@ const state = {
   portfolioSettings: null,
   positionPrices: [],
   positionRefresh: null,
+  dataWarnings: [],
   refreshTimer: null,
   dashboardRefreshTimer: null,
   dashboardRefreshing: false,
@@ -129,6 +130,7 @@ function clearSensitiveState() {
   state.portfolioSettings = null;
   state.positionPrices = [];
   state.positionRefresh = null;
+  state.dataWarnings = [];
   if (state.dashboardRefreshTimer) window.clearInterval(state.dashboardRefreshTimer);
   state.dashboardRefreshTimer = null;
   $("candidate-list").replaceChildren();
@@ -288,7 +290,7 @@ async function loadProfileAndRuns() {
     query("screening_runs", {
       select: "run_id,target_date,market,status,quality_status,started_at,finished_at,loaded_record_count,candidate_count,decision_eligible,code_version,result_json",
       order: "finished_at.desc",
-      limit: "200",
+      limit: "1000",
     }),
   ]);
   state.profile = profiles[0] || null;
@@ -327,7 +329,7 @@ async function loadSelectedRun() {
   const selected = selectRun(state.runs, $("target-date").value, $("market").value);
   state.selectedRun = selected;
   setMessage("データを読み込んでいます…");
-  const [selectedCandidates, allCandidates, decisions, orders, settings, prices, refreshState] = await Promise.all([
+  const results = await Promise.allSettled([
     selected ? query("candidates", {
       select: "candidate_id,run_id,candidate_hash,instrument_code,instrument_name,direction,current_price,suggested_quantity,score,reason,assumed_risk,status,decision_eligible,candidate_json,generated_at,expires_at",
       run_id: `eq.${selected.run_id}`,
@@ -359,16 +361,37 @@ async function loadSelectedRun() {
       limit: "1",
     }),
   ]);
-  state.candidates = selectedCandidates || [];
-  state.allCandidates = allCandidates || [];
-  state.decisions = decisions;
-  state.orders = orders;
-  state.portfolioSettings = settings[0] || null;
-  state.positionPrices = prices || [];
-  state.positionRefresh = refreshState[0] || null;
+  if (results[0].status === "rejected") {
+    const detail = results[0].reason?.message || "再読み込みしてください。";
+    throw new Error(`選択した対象日の候補データを取得できませんでした。${detail}`);
+  }
+  const labels = ["候補", "全候補履歴", "判断履歴", "選択履歴", "初期資金", "保有価格履歴", "価格更新状態"];
+  state.dataWarnings = results.flatMap((result, index) => (
+    result.status === "rejected" ? [`${labels[index]}を取得できませんでした`] : []
+  ));
+  const value = (index, fallback) => results[index].status === "fulfilled" ? results[index].value : fallback;
+  state.candidates = asArray(value(0, []));
+  state.allCandidates = asArray(value(1, state.candidates));
+  if (!state.allCandidates.length && state.candidates.length) state.allCandidates = [...state.candidates];
+  state.decisions = asArray(value(2, []));
+  state.orders = asArray(value(3, []));
+  state.portfolioSettings = asArray(value(4, []))[0] || null;
+  state.positionPrices = asArray(value(5, []));
+  state.positionRefresh = asArray(value(6, []))[0] || null;
   renderDashboard();
-  setMessage("");
+  setMessage(
+    state.dataWarnings.length ? `候補を表示しました。一部の履歴は取得できませんでした：${state.dataWarnings.join("、")}` : "",
+    state.dataWarnings.length ? "warning" : "",
+  );
   $("last-updated").textContent = `更新 ${formatDate(new Date().toISOString())}`;
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 function textNode(tag, text, className = "") {
@@ -384,7 +407,7 @@ function emptyNode(text) {
 
 function renderRunSummary() {
   const run = state.selectedRun;
-  const result = run?.result_json || {};
+  const result = asObject(run?.result_json);
   $("run-status").textContent = run ? statusLabel(run.status) : "結果なし";
   $("run-status").className = `candidate-state ${run?.status || ""}`;
   $("run-date").textContent = run ? `${run.target_date} / ${run.market}` : "—";
@@ -397,12 +420,21 @@ function renderRunSummary() {
   const selectedCount = state.candidates.filter((item) => item.status === "approved").length;
   $("candidate-count").textContent = `候補 ${run?.candidate_count || 0}件 / 選択 ${selectedCount}件`;
   $("run-id").textContent = run ? `RUN ${run.run_id}` : "";
-  const providers = result.provider_versions || {};
+  const providers = asObject(result.provider_versions);
   $("data-source-note").textContent = providers.yfinance
     ? `yfinance ${providers.yfinance}で取得したデータによる分析・ペーパーシミュレーションです。投資助言ではなく、実注文は送信されません。`
     : "保存済みデータによる分析・ペーパーシミュレーションです。投資助言ではなく、実注文は送信されません。";
-  renderBatchAlerts(result.warnings || [], result.errors || []);
+  renderBatchAlerts(asArray(result.warnings), asArray(result.errors));
   renderLatestBatch();
+  renderHistoryStatus();
+}
+
+function renderHistoryStatus() {
+  const summary = `Supabase履歴：分析実行 ${state.runs.length}件 / 候補 ${state.allCandidates.length}件 / 判断 ${state.decisions.length}件 / 選択 ${state.orders.length}件 / 保有価格 ${state.positionPrices.length}件`;
+  $("history-status").textContent = state.dataWarnings.length
+    ? `${summary}（一部取得エラーあり）`
+    : `${summary}（移行済みデータを表示中）`;
+  $("history-status").classList.toggle("warning", state.dataWarnings.length > 0);
 }
 
 function renderLatestBatch() {
@@ -431,8 +463,8 @@ function renderBatchAlerts(warnings, errors) {
   const container = $("batch-alerts");
   const list = $("batch-alerts-list");
   const items = [
-    ...warnings.map((message) => ({ type: "warning", message })),
-    ...errors.map((message) => ({ type: "error", message })),
+    ...asArray(warnings).map((message) => ({ type: "warning", message })),
+    ...asArray(errors).map((message) => ({ type: "error", message })),
   ];
   container.hidden = items.length === 0;
   list.replaceChildren();
@@ -582,7 +614,7 @@ function renderCandidates() {
     const status = textNode("span", statusLabel(item.status), `candidate-state ${item.status}`);
     meta.append(status);
     card.append(top, priceRow, details);
-    const payload = item.candidate_json || {};
+    const payload = asObject(item.candidate_json);
     if (payload.fundamental_analysis) card.append(renderFundamentalAnalysis(payload.fundamental_analysis));
     if (payload.news_analysis) card.append(renderNewsAnalysis(payload.news_analysis));
     if (payload.technical_analysis) card.append(renderTechnicalAnalysis(payload.technical_analysis));
@@ -654,12 +686,14 @@ function renderMetricRows(entries) {
 }
 
 function renderFundamentalAnalysis(analysis) {
+  analysis = asObject(analysis);
   const details = document.createElement("details");
   details.className = "candidate-analysis";
   const score = analysis.score == null ? "算定不能" : `${formatNumber(analysis.score)} / ${formatNumber(analysis.max_score)}点`;
   details.append(textNode("summary", `ファンダメンタル ${score} · 取得率 ${Math.round(Number(analysis.coverage_ratio || 0) * 100)}%`));
   details.append(textNode("p", `${analysis.fiscal_period ? `会計基準日 ${analysis.fiscal_period}` : "会計基準日 不明"} · ${analysis.next_earnings_date ? `次回決算 ${analysis.next_earnings_date}` : "次回決算 不明"}`, "analysis-note"));
-  const entries = Object.values(analysis.metrics || {})
+  const entries = Object.values(asObject(analysis.metrics))
+    .filter((metric) => metric && typeof metric === "object")
     .filter((metric) => metric.unit !== "currency")
     .map((metric) => {
       const value = metric.value == null ? "不明" : metric.unit === "percent"
@@ -674,14 +708,15 @@ function renderFundamentalAnalysis(analysis) {
 }
 
 function renderNewsAnalysis(analysis) {
+  analysis = asObject(analysis);
   const details = document.createElement("details");
   details.className = "candidate-analysis news-analysis";
-  const counts = analysis.sentiment_counts || {};
+  const counts = asObject(analysis.sentiment_counts);
   details.append(textNode("summary", `ニュース注意情報 ${analysis.article_count || 0}件 · ポジティブ${counts.positive || 0} / ネガティブ${counts.negative || 0}`));
   if (analysis.critical_review) details.append(textNode("div", "重大イベント候補あり：人間による確認が必要です", "critical-review"));
   const list = document.createElement("div");
   list.className = "news-list";
-  for (const article of analysis.articles || []) {
+  for (const article of asArray(analysis.articles).filter((item) => item && typeof item === "object")) {
     const item = document.createElement("article");
     let heading = textNode("strong", article.title || "タイトル不明");
     if (/^https:\/\//.test(String(article.url || ""))) {
@@ -700,10 +735,11 @@ function renderNewsAnalysis(analysis) {
 }
 
 function renderTechnicalAnalysis(analysis) {
+  analysis = asObject(analysis);
   const details = document.createElement("details");
   details.className = "candidate-analysis";
   details.append(textNode("summary", `テクニカル ${formatNumber(analysis.score)} / ${formatNumber(analysis.max_score)}点 · ${analysis.eligible ? "買いタイミング通過" : "未通過"}`));
-  const value = analysis.indicators || {};
+  const value = asObject(analysis.indicators);
   details.append(renderMetricRows([
     ["移動平均 20日 / 60日", `${formatNumber(value.ma20)} / ${formatNumber(value.ma60)}`],
     ["RSI(14)", formatNumber(value.rsi14)],
@@ -718,6 +754,7 @@ function renderTechnicalAnalysis(analysis) {
 function renderPositions(positions) {
   const container = $("positions");
   container.replaceChildren();
+  positions = asArray(positions);
   if (!positions.length) {
     container.append(emptyNode("現在の保有銘柄はありません。"));
     return;
@@ -737,6 +774,7 @@ function renderPositions(positions) {
 }
 
 function renderAcquisitionReasons(records) {
+  records = asArray(records);
   const details = document.createElement("details");
   details.className = "acquisition-reasons";
   details.append(textNode("summary", `取得時の理由・再現条件（${records.length}件）`));
@@ -762,6 +800,7 @@ function renderAcquisitionReasons(records) {
 }
 
 function renderTrades(orders, candidates) {
+  orders = asArray(orders);
   const body = $("trade-history");
   body.replaceChildren();
   for (const item of orders) {

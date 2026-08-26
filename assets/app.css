@@ -92,6 +92,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest); box-sha
 .app-message { min-height: 28px; padding: 12px 0 0; color: var(--muted); font-weight: 700; }
 .app-message.error { color: var(--red); }
 .app-message.success { color: var(--forest); }
+.app-message.warning { color: #655b25; }
+.history-status { margin: -4px 0 22px; color: var(--muted); font-size: .82rem; }
+.history-status.warning { color: #655b25; }
 .run-panel { display: grid; gap: 10px; margin-top: 26px; padding: 24px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .run-panel h2, .run-panel p { margin: 0; }
 .run-line { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: .82rem; }
