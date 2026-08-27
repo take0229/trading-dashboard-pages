@@ -161,6 +161,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--forest); box-sha
 .yahoo-paper-guide small { color: var(--muted); line-height: 1.45; }
 .empty-state { grid-column: 1 / -1; padding: 48px 24px; border: 1px dashed #cbd3cb; border-radius: var(--radius); color: var(--muted); text-align: center; background: rgba(255,255,255,.5); }
 .position-list { display: grid; gap: 12px; margin-top: 18px; }
+.exit-rule-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.exit-rule-form label { display: flex; gap: 6px; align-items: center; font-weight: 800; }
+.exit-rule-form input { width: 7rem; padding: 9px; }
+.exit-rule-form small, .exit-rule-form .form-message { flex-basis: 100%; margin: 0; }
 .position-item { display: grid; gap: 12px; padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
 .position-item header { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
 .position-value { font-family: Georgia, serif; font-size: 1.35rem; }

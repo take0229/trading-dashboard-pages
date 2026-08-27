@@ -14,6 +14,8 @@ import {
 } from "./domain.mjs";
 
 const SESSION_KEY = "trading-dashboard-session-v1";
+const DEFAULT_TAKE_PROFIT_RATE = 0.25;
+const DEFAULT_STOP_LOSS_RATE = -0.20;
 const config = window.TRADING_DASHBOARD_CONFIG || {};
 const state = {
   session: null,
@@ -358,7 +360,7 @@ async function loadSelectedRun() {
       order: "created_at.desc",
       limit: "1000",
     }),
-    query("paper_portfolio_settings", { select: "initial_cash,updated_at", limit: "1" }),
+    query("paper_portfolio_settings", { select: "initial_cash,take_profit_rate,stop_loss_rate,updated_at", limit: "1" }),
     query("paper_position_prices", {
       select: "instrument_code,price_date,close_price,run_id,recorded_at",
       order: "price_date.desc,instrument_code.asc",
@@ -397,6 +399,10 @@ async function loadSelectedRun() {
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function formatPercentValue(rate) {
+  return (Number(rate || 0) * 100).toFixed(1).replace(/\.0$/, "");
 }
 
 function asObject(value) {
@@ -492,6 +498,8 @@ function renderBatchAlerts(warnings, errors) {
 
 function buildPaperPortfolio() {
   const initialCash = Number(state.portfolioSettings?.initial_cash || 0);
+  const takeProfitRate = Number(state.portfolioSettings?.take_profit_rate ?? DEFAULT_TAKE_PROFIT_RATE);
+  const stopLossRate = Number(state.portfolioSettings?.stop_loss_rate ?? DEFAULT_STOP_LOSS_RATE);
   const candidates = new Map(state.allCandidates.map((item) => [item.candidate_id, item]));
   const decisions = new Map(state.decisions.map((item) => [item.decision_id, item]));
   const latestPrices = new Map();
@@ -541,7 +549,7 @@ function buildPaperPortfolio() {
     const marketValue = item.quantity * currentPrice;
     const profit = marketValue - item.invested_amount;
     const returnRate = item.invested_amount ? profit / item.invested_amount : 0;
-    const signal = !price ? "unavailable" : returnRate >= 0.14 ? "take_profit" : returnRate <= -0.07 ? "stop_loss" : "hold";
+    const signal = !price ? "unavailable" : returnRate >= takeProfitRate ? "take_profit" : returnRate <= stopLossRate ? "stop_loss" : "hold";
     return {
       ...item,
       average_cost: averageCost,
@@ -550,8 +558,10 @@ function buildPaperPortfolio() {
       unrealized_profit_loss: profit,
       unrealized_return_rate: returnRate,
       valuation_date: price?.price_date || null,
-      take_profit_price: averageCost * 1.14,
-      stop_loss_price: averageCost * 0.93,
+      take_profit_price: averageCost * (1 + takeProfitRate),
+      stop_loss_price: averageCost * (1 + stopLossRate),
+      take_profit_rate: takeProfitRate,
+      stop_loss_rate: stopLossRate,
       exit_signal: signal,
     };
   }).sort((left, right) => left.instrument_code.localeCompare(right.instrument_code));
@@ -563,6 +573,8 @@ function buildPaperPortfolio() {
   const totalProfit = realizedProfit + unrealizedProfit;
   return {
     initial_cash: initialCash,
+    take_profit_rate: takeProfitRate,
+    stop_loss_rate: stopLossRate,
     cash_balance: cashBalance,
     invested_amount: investedAmount,
     market_value: marketValue,
@@ -577,6 +589,10 @@ function buildPaperPortfolio() {
 
 function renderPortfolio() {
   const portfolio = buildPaperPortfolio();
+  if (!$("exit-rule-form").contains(document.activeElement)) {
+    $("take-profit-percent").value = String(portfolio.take_profit_rate * 100);
+    $("stop-loss-percent").value = String(Math.abs(portfolio.stop_loss_rate * 100));
+  }
   $("paper-total-assets").textContent = formatYen(portfolio.total_assets);
   $("paper-initial-cash").textContent = `初期資金 ${formatYen(portfolio.initial_cash)}`;
   $("paper-cash").textContent = formatYen(portfolio.cash_balance);
@@ -796,8 +812,8 @@ function renderPositions(positions) {
     const summary = textNode("p", `平均 ${formatYen(item.average_cost)} / 現在 ${formatYen(item.current_price)} / 評価損益 ${profit > 0 ? "+" : ""}${formatYen(profit)}（取得額比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%） / 評価日 ${item.valuation_date || "未取得"}`);
     summary.className = profit > 0 ? "positive" : profit < 0 ? "negative" : "";
     const signalLabels = {
-      take_profit: "利確シグナル（+14%以上）",
-      stop_loss: "損切りシグナル（-7%以下）",
+      take_profit: `利確シグナル（+${formatPercentValue(item.take_profit_rate)}%以上）`,
+      stop_loss: `損切りシグナル（-${formatPercentValue(Math.abs(item.stop_loss_rate))}%以下）`,
       hold: "保有継続",
       unavailable: "判定不可（保存済み株価なし）",
     };
@@ -923,6 +939,41 @@ async function submitPaperExit(item) {
   }
 }
 
+async function submitExitRules(event) {
+  event.preventDefault();
+  const takeProfitPercent = Number($("take-profit-percent").value);
+  const stopLossPercent = Number($("stop-loss-percent").value);
+  const message = $("exit-rule-message");
+  if (!(takeProfitPercent > 0 && takeProfitPercent <= 500)) {
+    message.textContent = "利確率は0%超500%以下で入力してください。";
+    return;
+  }
+  if (!(stopLossPercent > 0 && stopLossPercent < 100)) {
+    message.textContent = "損切り率は0%超100%未満で入力してください。";
+    return;
+  }
+  const button = $("exit-rule-save");
+  button.disabled = true;
+  message.textContent = "保存しています…";
+  try {
+    const result = await businessRequest("/rpc/update_paper_exit_rules", {
+      method: "POST",
+      body: {
+        p_take_profit_rate: takeProfitPercent / 100,
+        p_stop_loss_rate: -stopLossPercent / 100,
+        p_reason: "ダッシュボードで利確・損切りルールを変更",
+      },
+    });
+    state.portfolioSettings = { ...(state.portfolioSettings || {}), ...(result || {}) };
+    await loadSelectedRun();
+    message.textContent = `利確 +${takeProfitPercent}%／損切り -${stopLossPercent}%へ変更しました。`;
+  } catch (error) {
+    message.textContent = error.status ? businessErrorMessage(error.status) : error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderDashboard() {
   renderRunSummary();
   renderPortfolio();
@@ -1044,6 +1095,7 @@ $("refresh-button").addEventListener("click", () => refreshAll());
 $("apply-filter").addEventListener("click", () => loadSelectedRun().catch((error) => setMessage(error.message, "error")));
 $("decision-form").addEventListener("submit", submitDecision);
 $("decision-cancel").addEventListener("click", () => $("decision-dialog").close());
+$("exit-rule-form").addEventListener("submit", submitExitRules);
 window.addEventListener("pageshow", (event) => {
   if (event.persisted && !state.session) showOnly("login-screen");
 });
