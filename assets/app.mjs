@@ -462,6 +462,8 @@ function localizeBatchMessage(message) {
   if (match) return `ニュースを取得できなかった候補が${formatNumber(Number(match[1]), 0)}件あります。ニュースを採点せず分析を継続しました。`;
   match = value.match(/^Held-position target-date prices were unavailable for (\d+) instrument\(s\): (.+)$/);
   if (match) return `保有銘柄${formatNumber(Number(match[1]), 0)}件の対象日株価を取得できませんでした（${match[2]}）。`;
+  match = value.match(/^Analysis continued after excluding (\d+) instrument\(s\) with missing target-date data: (.+)\.$/);
+  if (match) return `データ品質警告：対象日データが欠落した${formatNumber(Number(match[1]), 0)}銘柄（${match[2]}）を除外して分析を継続しました。`;
   if (value.startsWith("MVP v3 output is research support")) {
     return "この結果は調査支援とペーパートレード専用です。実注文は行われません。";
   }
