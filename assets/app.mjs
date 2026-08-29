@@ -14,6 +14,7 @@ import {
 } from "./domain.mjs";
 
 const SESSION_KEY = "trading-dashboard-session-v1";
+const DEFAULT_INITIAL_CASH = 3_000_000;
 const DEFAULT_TAKE_PROFIT_RATE = 0.25;
 const DEFAULT_STOP_LOSS_RATE = -0.20;
 const config = window.TRADING_DASHBOARD_CONFIG || {};
@@ -497,7 +498,10 @@ function renderBatchAlerts(warnings, errors) {
 }
 
 function buildPaperPortfolio() {
-  const initialCash = Number(state.portfolioSettings?.initial_cash || 0);
+  const storedInitialCash = Number(state.portfolioSettings?.initial_cash);
+  const initialCash = Number.isFinite(storedInitialCash) && storedInitialCash > 0
+    ? storedInitialCash
+    : DEFAULT_INITIAL_CASH;
   const takeProfitRate = Number(state.portfolioSettings?.take_profit_rate ?? DEFAULT_TAKE_PROFIT_RATE);
   const stopLossRate = Number(state.portfolioSettings?.stop_loss_rate ?? DEFAULT_STOP_LOSS_RATE);
   const candidates = new Map(state.allCandidates.map((item) => [item.candidate_id, item]));
@@ -589,6 +593,9 @@ function buildPaperPortfolio() {
 
 function renderPortfolio() {
   const portfolio = buildPaperPortfolio();
+  if (!$("initial-cash-form").contains(document.activeElement)) {
+    $("initial-cash-input").value = String(Math.round(portfolio.initial_cash));
+  }
   if (!$("exit-rule-form").contains(document.activeElement)) {
     $("take-profit-percent").value = String(portfolio.take_profit_rate * 100);
     $("stop-loss-percent").value = String(Math.abs(portfolio.stop_loss_rate * 100));
@@ -974,6 +981,40 @@ async function submitExitRules(event) {
   }
 }
 
+async function submitInitialCash(event) {
+  event.preventDefault();
+  const portfolio = buildPaperPortfolio();
+  const initialCash = Number($("initial-cash-input").value);
+  const message = $("initial-cash-message");
+  if (!Number.isSafeInteger(initialCash) || initialCash < 1 || initialCash > 1_000_000_000_000) {
+    message.textContent = "初期資金は1円以上1兆円以下の整数で入力してください。";
+    return;
+  }
+  if (initialCash < portfolio.invested_amount) {
+    message.textContent = `現在の保有取得原価 ${formatYen(portfolio.invested_amount)} 以上にしてください。`;
+    return;
+  }
+  const button = $("initial-cash-save");
+  button.disabled = true;
+  message.textContent = "保存しています…";
+  try {
+    const result = await businessRequest("/rpc/update_paper_initial_cash", {
+      method: "POST",
+      body: {
+        p_initial_cash: initialCash,
+        p_reason: "ダッシュボードで初期資金を変更",
+      },
+    });
+    state.portfolioSettings = { ...(state.portfolioSettings || {}), ...(result || {}) };
+    await loadSelectedRun();
+    message.textContent = `初期資金を${formatYen(initialCash)}に変更しました。`;
+  } catch (error) {
+    message.textContent = error.status ? businessErrorMessage(error.status) : error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderDashboard() {
   renderRunSummary();
   renderPortfolio();
@@ -1096,6 +1137,7 @@ $("apply-filter").addEventListener("click", () => loadSelectedRun().catch((error
 $("decision-form").addEventListener("submit", submitDecision);
 $("decision-cancel").addEventListener("click", () => $("decision-dialog").close());
 $("exit-rule-form").addEventListener("submit", submitExitRules);
+$("initial-cash-form").addEventListener("submit", submitInitialCash);
 window.addEventListener("pageshow", (event) => {
   if (event.persisted && !state.session) showOnly("login-screen");
 });
