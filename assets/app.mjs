@@ -463,6 +463,8 @@ function localizeBatchMessage(message) {
   const value = String(message || "");
   let match = value.match(/^Fundamental data was unavailable for (\d+) instrument\(s\)\.$/);
   if (match) return `ファンダメンタルデータを取得できなかった銘柄が${formatNumber(Number(match[1]), 0)}件あります。`;
+  match = value.match(/^Yahoo Finance rate limiting prevented fundamental retrieval for (\d+) instrument\(s\);/);
+  if (match) return `Yahoo Financeのアクセス制限により${formatNumber(Number(match[1]), 0)}銘柄の財務取得を中止しました。過剰な再試行を防ぐため、残りの個別取得も安全に停止しました。`;
   match = value.match(/^Target-date coverage is incomplete: (\d+) instrument\(s\) missing\.$/);
   if (match) return `対象日の株価データが不足している銘柄が${formatNumber(Number(match[1]), 0)}件あります。`;
   match = value.match(/^News data was unavailable for (\d+) candidate\(s\);/);
@@ -548,12 +550,25 @@ function buildPaperPortfolio() {
   const positions = [...positionsByCode.values()].map((item) => {
     const price = latestPrices.get(item.instrument_code);
     const fallbackCandidate = state.allCandidates.find((candidate) => candidate.instrument_code === item.instrument_code);
-    const currentPrice = Number(price?.close_price || fallbackCandidate?.current_price || (item.invested_amount / item.quantity) || 0);
     const averageCost = item.quantity ? item.invested_amount / item.quantity : 0;
+    const savedPositionPrice = Number(price?.close_price);
+    const savedCandidatePrice = Number(fallbackCandidate?.current_price);
+    const hasPositionPrice = Number.isFinite(savedPositionPrice) && savedPositionPrice > 0;
+    const hasCandidatePrice = Number.isFinite(savedCandidatePrice) && savedCandidatePrice > 0;
+    const currentPrice = hasPositionPrice
+      ? savedPositionPrice
+      : hasCandidatePrice
+        ? savedCandidatePrice
+        : averageCost;
+    const valuationSource = hasPositionPrice
+      ? "position_price"
+      : hasCandidatePrice
+        ? "candidate_price"
+        : "acquisition_price";
     const marketValue = item.quantity * currentPrice;
     const profit = marketValue - item.invested_amount;
     const returnRate = item.invested_amount ? profit / item.invested_amount : 0;
-    const signal = !price ? "unavailable" : returnRate >= takeProfitRate ? "take_profit" : returnRate <= stopLossRate ? "stop_loss" : "hold";
+    const signal = returnRate >= takeProfitRate ? "take_profit" : returnRate <= stopLossRate ? "stop_loss" : "hold";
     return {
       ...item,
       average_cost: averageCost,
@@ -561,7 +576,8 @@ function buildPaperPortfolio() {
       market_value: marketValue,
       unrealized_profit_loss: profit,
       unrealized_return_rate: returnRate,
-      valuation_date: price?.price_date || null,
+      valuation_date: price?.price_date || fallbackCandidate?.generated_at?.slice(0, 10) || item.acquisition_records.at(-1)?.selected_at?.slice(0, 10) || null,
+      valuation_source: valuationSource,
       take_profit_price: averageCost * (1 + takeProfitRate),
       stop_loss_price: averageCost * (1 + stopLossRate),
       take_profit_rate: takeProfitRate,
@@ -816,13 +832,17 @@ function renderPositions(positions) {
     header.append(textNode("div", `${item.instrument_code} · ${formatNumber(item.quantity, 0)}株`, "candidate-code"), textNode("strong", item.instrument_name), textNode("strong", formatYen(item.market_value), "position-value"));
     const rate = item.unrealized_return_rate * 100;
     const profit = item.unrealized_profit_loss;
-    const summary = textNode("p", `平均 ${formatYen(item.average_cost)} / 現在 ${formatYen(item.current_price)} / 評価損益 ${profit > 0 ? "+" : ""}${formatYen(profit)}（取得額比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%） / 評価日 ${item.valuation_date || "未取得"}`);
+    const sourceLabels = {
+      position_price: "保有価格履歴",
+      candidate_price: "候補保存株価",
+      acquisition_price: "取得時株価（次回更新待ち）",
+    };
+    const summary = textNode("p", `平均 ${formatYen(item.average_cost)} / 現在 ${formatYen(item.current_price)} / 評価損益 ${profit > 0 ? "+" : ""}${formatYen(profit)}（取得額比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%） / 評価日 ${item.valuation_date || "未取得"}・${sourceLabels[item.valuation_source] || "保存済み株価"}`);
     summary.className = profit > 0 ? "positive" : profit < 0 ? "negative" : "";
     const signalLabels = {
       take_profit: `利確シグナル（+${formatPercentValue(item.take_profit_rate)}%以上）`,
       stop_loss: `損切りシグナル（-${formatPercentValue(Math.abs(item.stop_loss_rate))}%以下）`,
       hold: "保有継続",
-      unavailable: "判定不可（保存済み株価なし）",
     };
     const signal = document.createElement("div");
     signal.className = `exit-signal ${item.exit_signal}`;
