@@ -32,6 +32,7 @@ const state = {
   portfolioSettings: null,
   positionPrices: [],
   positionRefresh: null,
+  batchExecution: null,
   dataWarnings: [],
   refreshTimer: null,
   dashboardRefreshTimer: null,
@@ -136,6 +137,7 @@ function clearSensitiveState() {
   state.portfolioSettings = null;
   state.positionPrices = [];
   state.positionRefresh = null;
+  state.batchExecution = null;
   state.dataWarnings = [];
   if (state.dashboardRefreshTimer) window.clearInterval(state.dashboardRefreshTimer);
   state.dashboardRefreshTimer = null;
@@ -291,17 +293,22 @@ async function handleLogin(event) {
 }
 
 async function loadProfileAndRuns() {
-  const [profiles, runs] = await Promise.all([
+  const [profiles, runs, batchExecutions] = await Promise.all([
     query("user_profiles", { select: "user_id,display_name,is_active", limit: "1" }),
     query("screening_runs", {
       select: "run_id,target_date,market,status,quality_status,started_at,finished_at,loaded_record_count,candidate_count,decision_eligible,code_version,result_json",
       order: "finished_at.desc",
       limit: "1000",
     }),
+    query("batch_execution_state", {
+      select: "target_date,market,status,analysis_completed,fundamental_usable,fundamental_pending,individual_requests,rate_limited,started_at,finished_at,updated_at",
+      limit: "1",
+    }),
   ]);
   state.profile = profiles[0] || null;
   if (!state.profile?.is_active) throw Object.assign(new Error("このアカウントは利用できません。"), { status: 403 });
   state.runs = runs || [];
+  state.batchExecution = batchExecutions[0] || null;
 }
 
 function populateFilters() {
@@ -454,9 +461,17 @@ function renderHistoryStatus() {
 }
 
 function renderLatestBatch() {
-  const latest = [...state.runs].sort((left, right) => Date.parse(right.finished_at || 0) - Date.parse(left.finished_at || 0))[0];
-  $("latest-batch-time").textContent = latest ? formatDate(latest.finished_at) : "実行履歴なし";
-  $("latest-batch-target").textContent = latest ? `${statusLabel(latest.status)} · 対象日 ${latest.target_date} / ${latest.market}` : "";
+  const latestRun = [...state.runs].sort((left, right) => Date.parse(right.finished_at || 0) - Date.parse(left.finished_at || 0))[0];
+  const batch = state.batchExecution;
+  const useBatch = batch?.finished_at && (!latestRun?.finished_at || Date.parse(batch.finished_at) >= Date.parse(latestRun.finished_at));
+  if (useBatch) {
+    const labels = { waiting: "収集中・次回継続", completed: "完了", failed: "失敗", already_running: "実行中" };
+    $("latest-batch-time").textContent = formatDate(batch.finished_at);
+    $("latest-batch-target").textContent = `${labels[batch.status] || batch.status} · 対象日 ${batch.target_date} / ${batch.market} · 利用可能 ${formatNumber(batch.fundamental_usable, 0)}件 / 残り ${formatNumber(batch.fundamental_pending, 0)}件`;
+    return;
+  }
+  $("latest-batch-time").textContent = latestRun ? formatDate(latestRun.finished_at) : "実行履歴なし";
+  $("latest-batch-target").textContent = latestRun ? `${statusLabel(latestRun.status)} · 対象日 ${latestRun.target_date} / ${latestRun.market}` : "";
 }
 
 function localizeBatchMessage(message) {
