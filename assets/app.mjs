@@ -641,7 +641,7 @@ function renderPortfolio() {
   $("paper-profit").textContent = `${profit > 0 ? "+" : ""}${formatYen(profit)}`;
   $("paper-profit").className = profit > 0 ? "positive" : profit < 0 ? "negative" : "";
   const rate = portfolio.total_return_rate * 100;
-  $("paper-return-rate").textContent = `実現 ${formatYen(portfolio.realized_profit_loss)} / 評価 ${formatYen(portfolio.unrealized_profit_loss)} / 総資産比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`;
+  $("paper-return-rate").textContent = `実現 ${formatYen(portfolio.realized_profit_loss)} / 評価 ${formatYen(portfolio.unrealized_profit_loss)} / 元本比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`;
   renderPositions(portfolio.positions);
   renderTrades(state.orders, state.exits, new Map(state.allCandidates.map((item) => [item.candidate_id, item])));
 }
