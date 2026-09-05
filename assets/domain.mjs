@@ -9,6 +9,16 @@ const STATUS_LABELS = Object.freeze({
   expired: "期限切れ",
 });
 
+let displayCurrency = "JPY";
+let displayTimeZone = "Asia/Tokyo";
+let displayMarket = "TSE";
+
+export function configureMarketDisplay(market) {
+  displayMarket = market === "US" ? "US" : "TSE";
+  displayCurrency = market === "US" ? "USD" : "JPY";
+  displayTimeZone = market === "US" ? "America/New_York" : "Asia/Tokyo";
+}
+
 export function statusLabel(value) {
   return STATUS_LABELS[value] || String(value || "不明");
 }
@@ -20,7 +30,7 @@ export function formatDate(value) {
   return new Intl.DateTimeFormat("ja-JP", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "Asia/Tokyo",
+    timeZone: displayTimeZone,
   }).format(parsed);
 }
 
@@ -33,10 +43,11 @@ export function formatNumber(value, maximumFractionDigits = 2) {
 export function formatYen(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "—";
-  return new Intl.NumberFormat("ja-JP", {
+  return new Intl.NumberFormat(displayCurrency === "JPY" ? "ja-JP" : "en-US", {
     style: "currency",
-    currency: "JPY",
-    maximumFractionDigits: 0,
+    currency: displayCurrency,
+    minimumFractionDigits: displayCurrency === "JPY" ? 0 : 2,
+    maximumFractionDigits: displayCurrency === "JPY" ? 0 : 2,
   }).format(number);
 }
 
@@ -101,6 +112,9 @@ export function quoteUrl(value) {
   const code = safeInstrumentCode(value);
   if (!code) return "";
   const symbol = code.replace(/\.T$/i, "");
+  if (displayMarket === "US") {
+    return `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`;
+  }
   return `https://finance.yahoo.co.jp/quote/${encodeURIComponent(symbol)}.T`;
 }
 

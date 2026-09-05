@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; frame-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src https://hovdyyflzbghjtwdlqzb.supabase.co; upgrade-insecure-requests">
-  <title>取引候補ダッシュボード</title>
+  <title>日本株・米国株 取引候補ダッシュボード</title>
   <link rel="stylesheet" href="assets/app.css?v=20260828-1">
   <script src="config.js" defer></script>
-  <script type="module" src="assets/app.mjs?v=20260828-1"></script>
+  <script type="module" src="assets/app.mjs?v=20260905-2"></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">本文へ移動</a>
@@ -74,7 +74,7 @@
       <section class="filter-bar" aria-label="分析結果を選択">
         <div class="filter-title"><p class="eyebrow">RESULT EXPLORER</p><h2>分析結果を選択</h2></div>
         <label>対象日<select id="target-date"></select></label>
-        <label>市場<select id="market"><option value="TSE">東京証券取引所</option></select></label>
+        <label>市場<select id="market"><option value="TSE">日本株 (JPX)</option><option value="US">米国株 (NYSE / Nasdaq)</option></select></label>
         <button id="apply-filter" class="primary-button compact" type="button">結果を表示</button>
         <aside class="latest-batch" aria-label="最終バッチ実行">
           <span>最終バッチ実行</span><strong id="latest-batch-time">確認中…</strong>
@@ -115,9 +115,9 @@
       <section class="section-block">
         <div class="section-heading"><div><p class="eyebrow">PAPER POSITIONS</p><h2>ペーパートレード保有状況</h2></div></div>
         <form id="initial-cash-form" class="exit-rule-form">
-          <label>初期資金<input id="initial-cash-input" type="number" min="1" max="1000000000000" step="1" required>円</label>
+          <label>初期資金<input id="initial-cash-input" type="number" min="1" max="1000000000" step="0.01" required><span id="portfolio-currency">JPY</span></label>
           <button id="initial-cash-save" class="primary-button" type="submit">初期資金を保存</button>
-          <small>現在の保有取得原価以上の金額を、円単位の整数で設定してください。</small>
+          <small>現在の保有取得原価以上の金額を、選択市場の通貨単位で設定してください。</small>
           <p id="initial-cash-message" class="form-message" role="status"></p>
         </form>
         <form id="exit-rule-form" class="exit-rule-form">

@@ -2,6 +2,7 @@ import {
   activeOrderByCandidate,
   authErrorMessage,
   businessErrorMessage,
+  configureMarketDisplay,
   formatDate,
   formatNumber,
   formatYen,
@@ -11,10 +12,10 @@ import {
   quoteUrl,
   selectRun,
   statusLabel,
-} from "./domain.mjs";
+} from "./domain.mjs?v=20260905-2";
 
 const SESSION_KEY = "trading-dashboard-session-v1";
-const DEFAULT_INITIAL_CASH = 3_000_000;
+const DEFAULT_INITIAL_CASH = Object.freeze({ TSE: 3_000_000, US: 30_000 });
 const DEFAULT_TAKE_PROFIT_RATE = 0.25;
 const DEFAULT_STOP_LOSS_RATE = -0.20;
 const config = window.TRADING_DASHBOARD_CONFIG || {};
@@ -32,6 +33,7 @@ const state = {
   portfolioSettings: null,
   positionPrices: [],
   positionRefresh: null,
+  batchExecutions: [],
   batchExecution: null,
   dataWarnings: [],
   refreshTimer: null,
@@ -137,6 +139,7 @@ function clearSensitiveState() {
   state.portfolioSettings = null;
   state.positionPrices = [];
   state.positionRefresh = null;
+  state.batchExecutions = [];
   state.batchExecution = null;
   state.dataWarnings = [];
   if (state.dashboardRefreshTimer) window.clearInterval(state.dashboardRefreshTimer);
@@ -302,13 +305,14 @@ async function loadProfileAndRuns() {
     }),
     query("batch_execution_state", {
       select: "target_date,market,status,analysis_completed,fundamental_usable,fundamental_pending,individual_requests,rate_limited,started_at,finished_at,updated_at",
-      limit: "1",
+      order: "updated_at.desc",
+      limit: "10",
     }),
   ]);
   state.profile = profiles[0] || null;
   if (!state.profile?.is_active) throw Object.assign(new Error("このアカウントは利用できません。"), { status: 403 });
   state.runs = runs || [];
-  state.batchExecution = batchExecutions[0] || null;
+  state.batchExecutions = batchExecutions || [];
 }
 
 function populateFilters() {
@@ -323,13 +327,13 @@ function populateFilters() {
     target.append(option);
   }
   if (dates.includes(previous)) target.value = previous;
-  const markets = [...new Set(state.runs.map((run) => run.market))];
+  const markets = [...new Set(["TSE", "US", ...state.runs.map((run) => run.market)])];
   const market = $("market");
   market.replaceChildren();
-  for (const name of markets.length ? markets : ["TSE"]) {
+  for (const name of markets) {
     const option = document.createElement("option");
     option.value = name;
-    option.textContent = name === "TSE" ? "東京証券取引所" : name;
+    option.textContent = name === "US" ? "米国株 (NYSE / Nasdaq)" : "日本株 (JPX)";
     market.append(option);
   }
 }
@@ -340,7 +344,9 @@ function inFilter(values) {
 
 async function loadSelectedRun() {
   const selected = selectRun(state.runs, $("target-date").value, $("market").value);
+  const selectedMarket = selected?.market || $("market").value || "TSE";
   state.selectedRun = selected;
+  configureMarketDisplay(selectedMarket);
   setMessage("データを読み込んでいます…");
   const results = await Promise.allSettled([
     selected ? query("candidates", {
@@ -364,18 +370,25 @@ async function loadSelectedRun() {
       limit: "1000",
     }),
     query("paper_exits", {
-      select: "exit_id,request_id,instrument_code,instrument_name,action,quantity,exit_price,valuation_date,cost_basis,proceeds,realized_profit_loss,reason,outcome,created_at",
+      select: "exit_id,market,request_id,instrument_code,instrument_name,action,quantity,exit_price,valuation_date,cost_basis,proceeds,realized_profit_loss,reason,outcome,created_at",
+      market: `eq.${selectedMarket}`,
       order: "created_at.desc",
       limit: "1000",
     }),
-    query("paper_portfolio_settings", { select: "initial_cash,take_profit_rate,stop_loss_rate,updated_at", limit: "1" }),
+    query("paper_portfolio_settings", {
+      select: "market,initial_cash,take_profit_rate,stop_loss_rate,updated_at",
+      market: `eq.${selectedMarket}`,
+      limit: "1",
+    }),
     query("paper_position_prices", {
-      select: "instrument_code,price_date,close_price,run_id,recorded_at",
+      select: "market,instrument_code,price_date,close_price,run_id,recorded_at",
+      market: `eq.${selectedMarket}`,
       order: "price_date.desc,instrument_code.asc",
       limit: "5000",
     }),
     query("paper_position_refresh_state", {
-      select: "target_date,run_id,input_position_count,new_position_count,new_codes,updated_count,missing_codes,error,recorded_at",
+      select: "market,target_date,run_id,input_position_count,new_position_count,new_codes,updated_count,missing_codes,error,recorded_at",
+      market: `eq.${selectedMarket}`,
       limit: "1",
     }),
   ]);
@@ -389,10 +402,25 @@ async function loadSelectedRun() {
   ));
   const value = (index, fallback) => results[index].status === "fulfilled" ? results[index].value : fallback;
   state.candidates = asArray(value(0, []));
-  state.allCandidates = asArray(value(1, state.candidates));
+  state.batchExecution = state.batchExecutions.find(
+    (execution) => execution.market === selectedMarket,
+  ) || null;
+  const marketRunIds = new Set(
+    state.runs.filter((run) => run.market === selectedMarket).map((run) => run.run_id),
+  );
+  state.allCandidates = asArray(value(1, state.candidates)).filter(
+    (candidate) => marketRunIds.has(candidate.run_id),
+  );
   if (!state.allCandidates.length && state.candidates.length) state.allCandidates = [...state.candidates];
-  state.decisions = asArray(value(2, []));
-  state.orders = asArray(value(3, []));
+  const marketCandidateIds = new Set(
+    state.allCandidates.map((candidate) => candidate.candidate_id),
+  );
+  state.decisions = asArray(value(2, [])).filter(
+    (decision) => marketCandidateIds.has(decision.candidate_id),
+  );
+  state.orders = asArray(value(3, [])).filter(
+    (order) => marketCandidateIds.has(order.candidate_id),
+  );
   state.exits = asArray(value(4, []));
   state.portfolioSettings = asArray(value(5, []))[0] || null;
   state.positionPrices = asArray(value(6, []));
@@ -461,7 +489,10 @@ function renderHistoryStatus() {
 }
 
 function renderLatestBatch() {
-  const latestRun = [...state.runs].sort((left, right) => Date.parse(right.finished_at || 0) - Date.parse(left.finished_at || 0))[0];
+  const selectedMarket = state.selectedRun?.market || $("market").value || "TSE";
+  const latestRun = state.runs
+    .filter((run) => run.market === selectedMarket)
+    .sort((left, right) => Date.parse(right.finished_at || 0) - Date.parse(left.finished_at || 0))[0];
   const batch = state.batchExecution;
   const useBatch = batch?.finished_at && (!latestRun?.finished_at || Date.parse(batch.finished_at) >= Date.parse(latestRun.finished_at));
   if (useBatch) {
@@ -518,7 +549,7 @@ function buildPaperPortfolio() {
   const storedInitialCash = Number(state.portfolioSettings?.initial_cash);
   const initialCash = Number.isFinite(storedInitialCash) && storedInitialCash > 0
     ? storedInitialCash
-    : DEFAULT_INITIAL_CASH;
+    : (DEFAULT_INITIAL_CASH[state.selectedRun?.market] || DEFAULT_INITIAL_CASH.TSE);
   const takeProfitRate = Number(state.portfolioSettings?.take_profit_rate ?? DEFAULT_TAKE_PROFIT_RATE);
   const stopLossRate = Number(state.portfolioSettings?.stop_loss_rate ?? DEFAULT_STOP_LOSS_RATE);
   const candidates = new Map(state.allCandidates.map((item) => [item.candidate_id, item]));
@@ -624,8 +655,19 @@ function buildPaperPortfolio() {
 
 function renderPortfolio() {
   const portfolio = buildPaperPortfolio();
+  const cloudPaperTradingEnabled = ["TSE", "US"].includes(state.selectedRun?.market);
+  $("portfolio-currency").textContent = state.selectedRun?.market === "US" ? "USD" : "JPY";
+  $("initial-cash-input").step = state.selectedRun?.market === "US" ? "0.01" : "1";
+  $("initial-cash-save").disabled = !cloudPaperTradingEnabled;
+  $("exit-rule-save").disabled = !cloudPaperTradingEnabled;
+  if (!cloudPaperTradingEnabled) {
+    $("initial-cash-message").textContent = "対象市場の分析結果を選択してください。";
+    $("exit-rule-message").textContent = "対象市場の分析結果を選択してください。";
+  }
   if (!$("initial-cash-form").contains(document.activeElement)) {
-    $("initial-cash-input").value = String(Math.round(portfolio.initial_cash));
+    $("initial-cash-input").value = state.selectedRun?.market === "US"
+      ? Number(portfolio.initial_cash).toFixed(2)
+      : String(Math.round(portfolio.initial_cash));
   }
   if (!$("exit-rule-form").contains(document.activeElement)) {
     $("take-profit-percent").value = String(portfolio.take_profit_rate * 100);
@@ -728,10 +770,13 @@ function renderStockLinks(instrumentCode) {
   links.className = "stock-information-links";
   links.setAttribute("aria-label", `${instrumentCode}の外部株式情報`);
   const code = String(instrumentCode || "").replace(/\.T$/i, "");
-  for (const [label, href] of [
-    ["Yahoo!ファイナンス", quoteUrl(code)],
-    ["株探で深掘り", `https://kabutan.jp/stock/?code=${encodeURIComponent(code)}`],
-  ]) {
+  const destinations = state.selectedRun?.market === "US"
+    ? [["Yahoo Finance", quoteUrl(code)]]
+    : [
+      ["Yahoo!ファイナンス", quoteUrl(code)],
+      ["株探で深掘り", `https://kabutan.jp/stock/?code=${encodeURIComponent(code)}`],
+    ];
+  for (const [label, href] of destinations) {
     const link = textNode("a", label);
     link.href = href;
     link.target = "_blank";
@@ -745,13 +790,16 @@ function renderYahooPaperGuide(item, order) {
   const guide = document.createElement("div");
   guide.className = "yahoo-paper-guide";
   guide.append(
-    textNode("p", `Yahoo!ファイナンス「ペーパートレード」登録値：${formatNumber(order.quantity, 0)}株 / 購入価格 ${formatYen(order.reference_price)}`),
+    textNode("p", `外部ポートフォリオ登録値：${formatNumber(order.quantity, 0)}株 / 購入価格 ${formatYen(order.reference_price)}`),
   );
-  const link = textNode("a", "Yahoo!ポートフォリオに登録する ↗");
+  const isUs = state.selectedRun?.market === "US";
+  const link = textNode("a", isUs ? "Yahoo Financeで確認する ↗" : "Yahoo!ポートフォリオに登録する ↗");
   link.href = quoteUrl(item.instrument_code);
   link.target = "_blank";
   link.rel = "noopener noreferrer";
-  guide.append(link, textNode("small", "Yahoo! JAPANへログイン後、ポートフォリオのペーパートレードへ保有数と購入価格を入力してください。"));
+  guide.append(link, textNode("small", isUs
+    ? "外部サービスへ登録する場合も、実注文ではなくペーパーポートフォリオとして記録してください。"
+    : "Yahoo! JAPANへログイン後、ポートフォリオのペーパートレードへ保有数と購入価格を入力してください。"));
   return guide;
 }
 
@@ -969,6 +1017,7 @@ async function submitPaperExit(item) {
         p_instrument_code: item.instrument_code,
         p_action: item.exit_signal,
         p_reason: reason.trim(),
+        p_market: state.selectedRun.market,
       },
     });
     await loadSelectedRun();
@@ -1004,6 +1053,7 @@ async function submitExitRules(event) {
         p_take_profit_rate: takeProfitPercent / 100,
         p_stop_loss_rate: -stopLossPercent / 100,
         p_reason: "ダッシュボードで利確・損切りルールを変更",
+        p_market: state.selectedRun.market,
       },
     });
     state.portfolioSettings = { ...(state.portfolioSettings || {}), ...(result || {}) };
@@ -1021,8 +1071,10 @@ async function submitInitialCash(event) {
   const portfolio = buildPaperPortfolio();
   const initialCash = Number($("initial-cash-input").value);
   const message = $("initial-cash-message");
-  if (!Number.isSafeInteger(initialCash) || initialCash < 1 || initialCash > 1_000_000_000_000) {
-    message.textContent = "初期資金は1円以上1兆円以下の整数で入力してください。";
+  const cents = initialCash * 100;
+  if (!Number.isFinite(initialCash) || initialCash < 1 || initialCash > 1_000_000_000
+      || Math.abs(cents - Math.round(cents)) > 1e-7) {
+    message.textContent = "初期資金は1以上、上限以下で入力してください。";
     return;
   }
   if (initialCash < portfolio.invested_amount) {
@@ -1038,6 +1090,7 @@ async function submitInitialCash(event) {
       body: {
         p_initial_cash: initialCash,
         p_reason: "ダッシュボードで初期資金を変更",
+        p_market: state.selectedRun.market,
       },
     });
     state.portfolioSettings = { ...(state.portfolioSettings || {}), ...(result || {}) };
@@ -1090,6 +1143,7 @@ async function submitDecision(event) {
         p_candidate_hash: candidate.candidate_hash,
         p_decision: decision,
         p_reason: reason,
+        p_market: state.selectedRun.market,
       },
     });
     $("decision-dialog").close();
