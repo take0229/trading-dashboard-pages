@@ -318,6 +318,8 @@ async function loadProfileAndRuns() {
 function populateFilters() {
   const target = $("target-date");
   const previous = target.value;
+  const market = $("market");
+  const previousMarket = market.value;
   const dates = [...new Set(state.runs.map((run) => run.target_date))].sort().reverse();
   target.replaceChildren();
   for (const date of dates) {
@@ -328,7 +330,6 @@ function populateFilters() {
   }
   if (dates.includes(previous)) target.value = previous;
   const markets = [...new Set(["TSE", "US", ...state.runs.map((run) => run.market)])];
-  const market = $("market");
   market.replaceChildren();
   for (const name of markets) {
     const option = document.createElement("option");
@@ -336,6 +337,7 @@ function populateFilters() {
     option.textContent = name === "US" ? "米国株 (NYSE / Nasdaq)" : "日本株 (JPX)";
     market.append(option);
   }
+  if (markets.includes(previousMarket)) market.value = previousMarket;
 }
 
 function inFilter(values) {
