@@ -113,7 +113,7 @@ export function quoteUrl(value) {
   if (!code) return "";
   const symbol = code.replace(/\.T$/i, "");
   if (displayMarket === "US") {
-    return `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`;
+    return `https://finance.yahoo.co.jp/quote/${encodeURIComponent(symbol)}`;
   }
   return `https://finance.yahoo.co.jp/quote/${encodeURIComponent(symbol)}.T`;
 }
