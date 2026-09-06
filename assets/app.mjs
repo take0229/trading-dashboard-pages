@@ -12,7 +12,7 @@ import {
   quoteUrl,
   selectRun,
   statusLabel,
-} from "./domain.mjs?v=20260905-2";
+} from "./domain.mjs?v=20260906-1";
 
 const SESSION_KEY = "trading-dashboard-session-v1";
 const DEFAULT_INITIAL_CASH = Object.freeze({ TSE: 3_000_000, US: 30_000 });
