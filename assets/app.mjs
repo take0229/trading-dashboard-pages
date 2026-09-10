@@ -477,9 +477,26 @@ function renderRunSummary() {
   $("data-source-note").textContent = providers.yfinance
     ? `yfinance ${providers.yfinance}で取得したデータによる分析・ペーパーシミュレーションです。投資助言ではなく、実注文は送信されません。`
     : "保存済みデータによる分析・ペーパーシミュレーションです。投資助言ではなく、実注文は送信されません。";
-  renderBatchAlerts(asArray(result.warnings), asArray(result.errors));
+  renderBatchAlerts(currentRunWarnings(result.warnings), asArray(result.errors));
   renderLatestBatch();
   renderHistoryStatus();
+}
+
+function currentRunWarnings(warnings) {
+  const refresh = asObject(state.positionRefresh);
+  const run = state.selectedRun;
+  const portfolioIsCurrent = Boolean(
+    run
+    && refresh.market === run.market
+    && refresh.target_date === run.target_date
+    && !refresh.error
+    && asArray(refresh.missing_codes).length === 0
+    && Number(refresh.updated_count || 0) >= Number(refresh.input_position_count || 0)
+  );
+  if (!portfolioIsCurrent) return asArray(warnings);
+  return asArray(warnings).filter(
+    (message) => !/^Held-position target-date prices were unavailable /.test(String(message || "")),
+  );
 }
 
 function renderHistoryStatus() {
