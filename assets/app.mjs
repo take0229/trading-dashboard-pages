@@ -13,6 +13,7 @@ import {
   selectRun,
   statusLabel,
 } from "./domain.mjs?v=20260906-1";
+import { adjustedQuantity, marketDate, earningsLabel } from "./portfolio-policy.mjs?v=20261007-1";
 
 const SESSION_KEY = "trading-dashboard-session-v1";
 const DEFAULT_INITIAL_CASH = Object.freeze({ TSE: 3_000_000, US: 30_000 });
@@ -33,6 +34,9 @@ const state = {
   portfolioSettings: null,
   positionPrices: [],
   positionRefresh: null,
+  corporateActions: [],
+  corporateActionsAvailable: false,
+  positionReviews: [],
   batchExecutions: [],
   batchExecution: null,
   dataWarnings: [],
@@ -139,6 +143,9 @@ function clearSensitiveState() {
   state.portfolioSettings = null;
   state.positionPrices = [];
   state.positionRefresh = null;
+  state.corporateActions = [];
+  state.corporateActionsAvailable = false;
+  state.positionReviews = [];
   state.batchExecutions = [];
   state.batchExecution = null;
   state.dataWarnings = [];
@@ -393,12 +400,14 @@ async function loadSelectedRun() {
       market: `eq.${selectedMarket}`,
       limit: "1",
     }),
+    query("corporate_actions", {select: "*", market: `eq.${selectedMarket}`}),
+    query("audit_events", {select:"aggregate_id,payload,created_at", event_type:"eq.paper_position_reviewed", order:"created_at.desc", limit:"1000"}),
   ]);
   if (results[0].status === "rejected") {
     const detail = results[0].reason?.message || "再読み込みしてください。";
     throw new Error(`選択した対象日の候補データを取得できませんでした。${detail}`);
   }
-  const labels = ["候補", "全候補履歴", "判断履歴", "選択履歴", "決済履歴", "初期資金", "保有価格履歴", "価格更新状態"];
+  const labels = ["候補", "全候補履歴", "判断履歴", "選択履歴", "決済履歴", "初期資金", "保有価格履歴", "価格更新状態", "株式分割情報", "保有継続の確認履歴"];
   state.dataWarnings = results.flatMap((result, index) => (
     result.status === "rejected" ? [`${labels[index]}を取得できませんでした`] : []
   ));
@@ -427,6 +436,9 @@ async function loadSelectedRun() {
   state.portfolioSettings = asArray(value(5, []))[0] || null;
   state.positionPrices = asArray(value(6, []));
   state.positionRefresh = asArray(value(7, []))[0] || null;
+  state.corporateActions = asArray(value(8, []));
+  state.corporateActionsAvailable = results[8].status === "fulfilled";
+  state.positionReviews = asArray(value(9, [])).filter(r => r.payload?.market === selectedMarket);
   renderDashboard();
   setMessage(
     state.dataWarnings.length ? `候補を表示しました。一部の履歴は取得できませんでした：${state.dataWarnings.join("、")}` : "",
@@ -588,16 +600,24 @@ function buildPaperPortfolio() {
       invested_amount: 0,
       acquisition_records: [],
     };
-    const quantity = Number(order.quantity || 0);
-    const referencePrice = Number(order.reference_price || 0);
+    const originalQuantity = Number(order.quantity || 0);
+    const originalPrice = Number(order.reference_price || 0);
+    const fallbackPriceCandidate = state.allCandidates.find(item => item.instrument_code === code);
+    const quantityDate = latestPrices.get(code)?.price_date || (fallbackPriceCandidate?.generated_at ? marketDate(fallbackPriceCandidate.generated_at, state.selectedRun.market) : marketDate(order.created_at, state.selectedRun.market));
+    const adjusted = adjustedQuantity(order, code, quantityDate, state.selectedRun.market, state.corporateActions);
+    const quantity = adjusted.quantity;
+    const referencePrice = originalPrice / adjusted.factor;
     const decision = decisions.get(order.decision_id) || {};
     const snapshot = decision.candidate_snapshot || candidate.candidate_json || {};
     current.quantity += quantity;
-    current.invested_amount += quantity * referencePrice;
+    current.invested_amount += originalQuantity * originalPrice;
     current.acquisition_records.push({
       selected_at: order.created_at,
       quantity,
       reference_price: referencePrice,
+      original_quantity: originalQuantity,
+      original_reference_price: originalPrice,
+      split_factor: adjusted.factor,
       selection_reason: decision.reason,
       screening_reason: snapshot.reason || candidate.reason,
       assumed_risk: snapshot.assumed_risk || candidate.assumed_risk,
@@ -633,7 +653,7 @@ function buildPaperPortfolio() {
     const marketValue = item.quantity * currentPrice;
     const profit = marketValue - item.invested_amount;
     const returnRate = item.invested_amount ? profit / item.invested_amount : 0;
-    const signal = returnRate >= takeProfitRate ? "take_profit" : returnRate <= stopLossRate ? "stop_loss" : "hold";
+    const signal = !state.corporateActionsAvailable || !hasPositionPrice ? "review_required" : returnRate >= takeProfitRate ? "take_profit" : returnRate <= stopLossRate ? "stop_loss" : "hold";
     return {
       ...item,
       average_cost: averageCost,
@@ -648,6 +668,7 @@ function buildPaperPortfolio() {
       take_profit_rate: takeProfitRate,
       stop_loss_rate: stopLossRate,
       exit_signal: signal,
+      latest_review: state.positionReviews.find(r => r.aggregate_id === item.instrument_code)?.payload || null,
     };
   }).sort((left, right) => left.instrument_code.localeCompare(right.instrument_code));
   const investedAmount = positions.reduce((sum, item) => sum + item.invested_amount, 0);
@@ -703,6 +724,11 @@ function renderPortfolio() {
   $("paper-profit").className = profit > 0 ? "positive" : profit < 0 ? "negative" : "";
   const rate = portfolio.total_return_rate * 100;
   $("paper-return-rate").textContent = `実現 ${formatYen(portfolio.realized_profit_loss)} / 評価 ${formatYen(portfolio.unrealized_profit_loss)} / 元本比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%`;
+  if (!state.corporateActionsAvailable) {
+    for (const id of ["paper-total-assets", "paper-market-value", "paper-profit"]) $(id).textContent = "未確認";
+    $("paper-profit").className = "";
+    $("paper-return-rate").textContent = "株式分割情報を取得できないため、評価額・損益の確定と決済を停止しています。";
+  }
   renderPositions(portfolio.positions);
   renderTrades(state.orders, state.exits, new Map(state.allCandidates.map((item) => [item.candidate_id, item])));
 }
@@ -756,6 +782,8 @@ function renderCandidates() {
     meta.append(status);
     card.append(top, priceRow, details);
     const payload = asObject(item.candidate_json);
+    for (const warning of asArray(payload.information_warnings)) card.append(textNode("p", warning, "analysis-note"));
+    if (payload.position_sizing) card.append(textNode("p", `リスク上限からの提案 ${formatNumber(payload.position_sizing.quantity, 0)}株 · 1銘柄15%以内 / 予定損失1%以内 · ${payload.position_sizing.basis === "current_portfolio" ? "分析時の保有資産を使用" : "初期資金を仮定した参考値"}`, "analysis-note"));
     if (payload.fundamental_analysis) card.append(renderFundamentalAnalysis(payload.fundamental_analysis));
     if (payload.news_analysis) card.append(renderNewsAnalysis(payload.news_analysis));
     if (payload.technical_analysis) card.append(renderTechnicalAnalysis(payload.technical_analysis));
@@ -774,7 +802,7 @@ function renderCandidates() {
       button.type = "button";
       button.className = `decision-button ${decision === "approved" ? "approve" : ""}`;
       button.textContent = item.status === decision ? `${label}（記録済み）` : label;
-      button.disabled = !eligible || item.status === decision;
+      button.disabled = !eligible || item.status === decision || (decision === "approved" && (!state.corporateActionsAvailable || payload.position_sizing?.status === "insufficient_budget"));
       button.addEventListener("click", () => openDecision(item, decision));
       actions.append(button);
     }
@@ -839,7 +867,7 @@ function renderFundamentalAnalysis(analysis) {
   details.className = "candidate-analysis";
   const score = analysis.score == null ? "算定不能" : `${formatNumber(analysis.score)} / ${formatNumber(analysis.max_score)}点`;
   details.append(textNode("summary", `ファンダメンタル ${score} · 取得率 ${Math.round(Number(analysis.coverage_ratio || 0) * 100)}%`));
-  details.append(textNode("p", `${analysis.fiscal_period ? `会計基準日 ${analysis.fiscal_period}` : "会計基準日 不明"} · ${analysis.next_earnings_date ? `次回決算 ${analysis.next_earnings_date}` : "次回決算 不明"}`, "analysis-note"));
+  details.append(textNode("p", `${analysis.fiscal_period ? `会計基準日 ${analysis.fiscal_period}` : "会計基準日 不明"} · ${earningsLabel(analysis.next_earnings_date, marketDate(new Date().toISOString(), state.selectedRun?.market))}`, "analysis-note"));
   const entries = Object.values(asObject(analysis.metrics))
     .filter((metric) => metric && typeof metric === "object")
     .filter((metric) => metric.unit !== "currency")
@@ -860,7 +888,7 @@ function renderNewsAnalysis(analysis) {
   const details = document.createElement("details");
   details.className = "candidate-analysis news-analysis";
   const counts = asObject(analysis.sentiment_counts);
-  details.append(textNode("summary", `ニュース注意情報 ${analysis.article_count || 0}件 · ポジティブ${counts.positive || 0} / ネガティブ${counts.negative || 0}`));
+  details.append(textNode("summary", !analysis.article_count || analysis.error ? "ニュース 未確認（記事0件・取得失敗は安全確認済みではありません）" : `ニュース注意情報 ${analysis.article_count}件 · ポジティブ${counts.positive || 0} / ネガティブ${counts.negative || 0}`));
   if (analysis.critical_review) details.append(textNode("div", "重大イベント候補あり：人間による確認が必要です", "critical-review"));
   const list = document.createElement("div");
   list.className = "news-list";
@@ -900,6 +928,7 @@ function renderTechnicalAnalysis(analysis) {
 }
 
 function renderPositions(positions) {
+  const totalAssets = buildPaperPortfolio().total_assets;
   const container = $("positions");
   container.replaceChildren();
   positions = asArray(positions);
@@ -911,7 +940,7 @@ function renderPositions(positions) {
     const row = document.createElement("article");
     row.className = "position-item";
     const header = document.createElement("header");
-    header.append(textNode("div", `${item.instrument_code} · ${formatNumber(item.quantity, 0)}株`, "candidate-code"), textNode("strong", item.instrument_name), textNode("strong", formatYen(item.market_value), "position-value"));
+    header.append(textNode("div", `${item.instrument_code} · ${formatNumber(item.quantity, 0)}株${state.corporateActionsAvailable ? "" : "（補正未確認）"}`, "candidate-code"), textNode("strong", item.instrument_name), textNode("strong", state.corporateActionsAvailable ? formatYen(item.market_value) : "評価未確認", "position-value"));
     const rate = item.unrealized_return_rate * 100;
     const profit = item.unrealized_profit_loss;
     const sourceLabels = {
@@ -921,7 +950,9 @@ function renderPositions(positions) {
     };
     const summary = textNode("p", `平均 ${formatYen(item.average_cost)} / 現在 ${formatYen(item.current_price)} / 評価損益 ${profit > 0 ? "+" : ""}${formatYen(profit)}（取得額比 ${rate >= 0 ? "+" : ""}${rate.toFixed(2)}%） / 評価日 ${item.valuation_date || "未取得"}・${sourceLabels[item.valuation_source] || "保存済み株価"}`);
     summary.className = profit > 0 ? "positive" : profit < 0 ? "negative" : "";
+    if (!state.corporateActionsAvailable) { summary.textContent = "株式分割情報の取得後に損益を再計算します。"; summary.className = ""; }
     const signalLabels = {
+      review_required: "評価情報の確認が必要（決済停止）",
       take_profit: `利確シグナル（+${formatPercentValue(item.take_profit_rate)}%以上）`,
       stop_loss: `損切りシグナル（-${formatPercentValue(Math.abs(item.stop_loss_rate))}%以下）`,
       hold: "保有継続",
@@ -940,7 +971,14 @@ function renderPositions(positions) {
       button.disabled = state.exitPending;
       button.addEventListener("click", () => submitPaperExit(item));
       signal.append(button);
+      const review = textNode("button", "保有継続の条件・次回確認日を記録");
+      review.type = "button";
+      review.addEventListener("click", () => submitPositionReview(item));
+      signal.append(review);
     }
+    const weight = totalAssets > 0 ? item.market_value / totalAssets : 0;
+    if (weight > 0.15) row.append(textNode("p", `資産比率 ${(weight * 100).toFixed(1)}%：1銘柄15%の検証目安を超えています。`, "analysis-note"));
+    if (item.latest_review) row.append(textNode("p", `${item.latest_review.review_on <= marketDate(new Date().toISOString(), state.selectedRun.market) ? "再確認期限です。" : ""}保有継続条件：${item.latest_review.reason} · 次回確認 ${item.latest_review.review_on}`, "analysis-note"));
     row.append(header, summary, signal, renderStockLinks(item.instrument_code), renderAcquisitionReasons(item.acquisition_records));
     container.append(row);
   }
@@ -959,6 +997,7 @@ function renderAcquisitionReasons(records) {
       textNode("p", `候補根拠：${record.screening_reason || "記録なし"}`),
       textNode("p", `想定リスク：${record.assumed_risk || "記録なし"}`),
     );
+    if (record.split_factor && record.split_factor !== 1) article.append(textNode("p", `株式分割補正 ×${record.split_factor}（元の購入記録 ${formatNumber(record.original_quantity, 0)}株 / ${formatYen(record.original_reference_price)}）`));
     const scores = [
       record.total_score != null ? `総合 ${record.total_score}` : null,
       record.fundamental_score != null ? `ファンダメンタル ${record.fundamental_score}` : null,
@@ -1018,6 +1057,18 @@ function renderTrades(orders, exits, candidates) {
     row.append(cell);
     body.append(row);
   }
+}
+
+async function submitPositionReview(item) {
+  const reason = window.prompt("保有を継続する理由と、見直す条件を入力してください。");
+  if (!reason?.trim()) return;
+  const reviewOn = window.prompt("次回確認日をYYYY-MM-DDで入力してください。");
+  if (!reviewOn) return;
+  try {
+    await businessRequest("/rpc/record_paper_position_review", {method:"POST",body:{p_request_id:newRequestId(),p_market:state.selectedRun.market,p_instrument_code:item.instrument_code,p_reason:reason.trim(),p_review_on:reviewOn}});
+    await loadSelectedRun();
+    setMessage("保有継続の確認を記録しました。利確・損切りの基準は引き続き表示します。", "success");
+  } catch (error) { setMessage(error.message, "error"); }
 }
 
 async function submitPaperExit(item) {
